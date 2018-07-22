@@ -1,1 +1,1 @@
-# TGS_Salt_Identification
+# TGS Salt Identification Challenge on Kaggle
