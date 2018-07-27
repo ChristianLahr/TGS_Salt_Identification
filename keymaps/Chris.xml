@@ -1,0 +1,17 @@
+<keymap version="1" name="Chris" parent="Mac OS X">
+  <action id="CollapseExpandableComponent">
+    <keyboard-shortcut first-keystroke="meta subtract" />
+    <keyboard-shortcut first-keystroke="meta minus" />
+  </action>
+  <action id="EditorStartNewLine" />
+  <action id="ExecuteInPyConsoleAction">
+    <keyboard-shortcut first-keystroke="shift alt e" />
+    <keyboard-shortcut first-keystroke="shift ctrl e" />
+    <keyboard-shortcut first-keystroke="shift enter" />
+  </action>
+  <action id="ExpandExpandableComponent">
+    <keyboard-shortcut first-keystroke="meta add" />
+    <keyboard-shortcut first-keystroke="meta equals" />
+  </action>
+  <action id="OpenElementInNewWindow" />
+</keymap>
