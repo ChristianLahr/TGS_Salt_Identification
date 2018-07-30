@@ -1,7 +1,6 @@
 from keras.models import Model, load_model
 from keras.layers import Conv2D, Input, Concatenate
 from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.losses import binary_crossentropy
 import cv2
 from keras.preprocessing.image import ImageDataGenerator
 from tqdm import tqdm, tnrange
@@ -16,6 +15,11 @@ from sklearn.model_selection import train_test_split
 from keras import backend as K
 import pandas as pd
 
+from load import load_and_resize
+from metrics_losses import custom_loss, mean_iou
+from architectures import Architectures
+from keras.losses import binary_crossentropy
+
 SEED = 12345
 BATCH_SIZE = 8
 EPOCHS = 1
@@ -23,11 +27,10 @@ PARTIENCE = 5
 width = 128
 heigth = 128
 im_chan = 1
-TRAIN_IMAGE_DIR = r'assets/train/images/'
-TRAIN_MASK_DIR =  r'assets/train/masks/'
+max_n = 100
+max_n_test = 640
 MODEL_DIR =       r'models/U-Net/model1/'
 MODEL_NAME =      'model1.h5'
-TEST_IMAGE_DIR =  r'assets/test/images/'
 TRAIN_DIR =       r'assets/train/'
 TEST_DIR =        r'assets/test/'
 
@@ -40,31 +43,11 @@ test_ids = next(os.walk(TEST_DIR + "images"))[2]
 # Get and resize train images and masks
 print('Getting and resizing train images and masks ... ')
 sys.stdout.flush()
-def load_and_resize(ids_, path, im_height, im_width, im_chan, max_n, train=True):
-    X_ = np.zeros((min(len(ids_), max_n), im_height, im_width, im_chan), dtype=np.uint8)
-    Y_ = np.zeros((min(len(ids_), max_n), im_height, im_width, 1), dtype=np.bool)
-    sizes_ = []
-    for n, id_ in tqdm(enumerate(ids_), total=min(len(ids_), max_n)):
-        if n > max_n -1:
-            break
-        img = load_img(path + '/images/' + id_)
-        x = img_to_array(img)[:,:,1]
-        x = resize(x, (im_height, im_width, 1), mode='constant', preserve_range=True)
-        X_[n] = x
-        if train:
-            mask = img_to_array(load_img(path + '/masks/' + id_))[:,:,1]
-            Y_[n] = resize(mask, (im_height, im_width, 1), mode='constant', preserve_range=True)
-        else:
-            sizes_.append([x.shape[0], x.shape[1]])
-    if train:
-        return X_, Y_
-    else:
-        return X_, sizes_
 
-X_train, Y_train = load_and_resize(train_ids, TRAIN_DIR, heigth, width, im_chan, 100)
+X_train, Y_train = load_and_resize(train_ids, TRAIN_DIR, heigth, width, im_chan, max_n)
 X_train, X_valid, Y_train, Y_valid = train_test_split(X_train, Y_train, random_state=SEED, test_size = 0.1)
 
-
+# image augmentation
 data_gen_args = dict(rescale=1./255,
                      vertical_flip=True,
                      horizontal_flip=True,
@@ -77,65 +60,34 @@ data_gen_args = dict(rescale=1./255,
 image_datagen = ImageDataGenerator(**data_gen_args)
 mask_datagen = ImageDataGenerator(**data_gen_args)
 
-def conv_block(num_layers,inp,units,kernel):
-    x = inp
-    for l in range(num_layers):
-        x = Conv2D(units, kernel_size=kernel, padding='SAME',activation='relu')(x)
-    return x
-
-inp = Input(shape=(128,128,1))
-cnn1 = conv_block(4,inp,32,3)
-cnn2 = conv_block(4,inp,24,5)
-cnn3 = conv_block(4,inp,16,7)
-concat = Concatenate()([cnn1,cnn2,cnn3])
-d1 = Conv2D(16,1, activation='relu')(concat)
-out = Conv2D(1,1, activation='sigmoid')(d1)
-
+# define and train the model
+architectures = Architectures()
+inp, out = architectures.unet()
 model = Model(inputs = inp, outputs = out)
 model.summary()
 
-# Define IoU metric
-def mean_iou(y_true, y_pred):
-    prec = []
-    for t in np.arange(0.5, 1.0, 0.05):
-        y_pred_ = tf.to_int32(y_pred > t)
-        score, up_opt = tf.metrics.mean_iou(y_true, y_pred_, 2)
-        K.get_session().run(tf.local_variables_initializer())
-        with tf.control_dependencies([up_opt]):
-            score = tf.identity(score)
-        prec.append(score)
-    return K.mean(K.stack(prec), axis=0)
-
-def custom_loss(y_true, y_pred):
-    loss1=binary_crossentropy(y_true,y_pred)
-    loss2=mean_iou(y_true,y_pred)
-    a1 = 1
-    a2 = 1
-    return a1*loss1 + a2*K.log(loss2)
-
 model.compile(optimizer='adam',loss=custom_loss)
 
-early_stop = EarlyStopping(patience=5)
-check_point = ModelCheckpoint('model.hdf5',save_best_only=True)
-
 earlystopper = EarlyStopping(patience=PARTIENCE, verbose=1)
-checkpointer = ModelCheckpoint(MODEL_DIR + MODEL_NAME, verbose=1, save_best_only=True)
+checkpointer = ModelCheckpoint(MODEL_DIR + MODEL_NAME, monitor = "val_loss", mode = "min", verbose=1, save_best_only=True)
 
 model.fit_generator(image_datagen.flow(X_train,
-                    Y_train, batch_size=BATCH_SIZE),
+                    Y_train,
+                    batch_size=BATCH_SIZE),
                     steps_per_epoch=len(X_train) / 32,
                     epochs=EPOCHS,
                     callbacks=[earlystopper, checkpointer],
                     validation_data=(X_valid,Y_valid))
 
 sys.stdout.flush()
-max_n_test = 640
 X_test, sizes_test = load_and_resize(test_ids, TEST_DIR, heigth, width, im_chan, max_n_test, train=False)
 
 # Predict on train, val and test
 model = load_model(MODEL_DIR + 'model1.h5', custom_objects={'custom_loss': custom_loss})
-preds_train = model.predict(X_train[:int(X_train.shape[0]*0.9)], verbose=1)
-preds_val = model.predict(X_train[int(X_train.shape[0]*0.9):], verbose=1)
+preds_train = model.predict(X_train, verbose=1)
+preds_val = model.predict(X_valid, verbose=1)
+#preds_train = model.predict(X_train[:int(X_train.shape[0]*0.9)], verbose=1)
+#preds_val = model.predict(X_train[int(X_train.shape[0]*0.9):], verbose=1)
 preds_test = model.predict(X_test, verbose=1)
 
 # Threshold predictions
@@ -150,16 +102,12 @@ for i in tnrange(len(preds_test)):
                                        (sizes_test[i][0], sizes_test[i][1]),
                                        mode='constant', preserve_range=True))
 
-print(preds_test_upsampled[0].shape)
-
-"""
-test_fns = os.listdir(TEST_IMAGE_DIR)
-X_test = [np.array(cv2.imread(TEST_IMAGE_DIR + p, cv2.IMREAD_GRAYSCALE), dtype=np.uint8) for p in tqdm(test_fns)]
-X_test = np.array(X_test)/255
-X_test = np.expand_dims(X_test,axis=3)
-
-pred = model.predict(X_test, verbose = True)
-"""
+#X_train.shape
+#X_valid.shape
+#Y_valid.shape
+#preds_val_t.shape
+print("mean_iou in validation set:", mean_iou(X_valid,Y_valid))
+print("binary_crossentropy in validation set:", binary_crossentropy(X_valid,Y_valid))
 
 def RLenc(img, order='F', format=True):
     """
@@ -203,6 +151,8 @@ pred_dict = {fn[:-4]:RLenc(np.round(preds_test_upsampled[i])) for i,fn in tqdm(e
 sub = pd.DataFrame.from_dict(pred_dict,orient='index')
 sub.index.names = ['id']
 sub.columns = ['rle_mask']
-sub.to_csv('submission.csv')
+if not os.path.exists(r"submissions/augmentation/"):
+    os.mkdir(r"submissions/augmentation/")
+sub.to_csv(r'submissions/augmentation/submission.csv')
 
 
