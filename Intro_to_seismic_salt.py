@@ -173,10 +173,9 @@ results = model.fit(X_train, Y_train, validation_split=0.1, batch_size=batch_siz
                     callbacks=[earlystopper, checkpointer])
 
 # Get and resize test images
-sizes_test = []
 print('Getting and resizing test images ... ')
 sys.stdout.flush()
-X_test, sizes_ = load_and_resize(test_ids, path_test, im_height, im_width, im_chan, train=False)
+X_test, sizes_test = load_and_resize(test_ids, path_test, im_height, im_width, im_chan, train=False)
 
 print('Done!')
 
