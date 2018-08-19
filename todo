@@ -1,0 +1,18 @@
++ welchen loss benutzen?
++ custom loss nicht bei prediction als referenz angeben, wenn voher nicht in build_model angegeben!
+
++ loss an der Kante erhöhen
++ weitere Architekturen: Encoder ersetzen durch vortrainiertes Modell
++ weitere Architekturen: Extra features: depth, "geographische Farbe",
++ Activation Sigmoid
++ Test unet bis 4x4 & bis 2x2 & bis 1x1
+
++ ist uint8 der richtige datentyp für die submission???
++ logger einbauen, z.B. logging.basicConfig(filename='/path/to/file.log', filemode='w', level=logging.DEBUG)
+
++ Querverbindungen durch dreikombi aus normal maxpool averagepool ersetzten
++ zu Querverbindungen fully hinzufügen
++ nicht beim laden "/255" und dann beim augmentation nochmal "/255"!!
++ brauch man im kernal: './' an Anfang der Pfade?
+
++ padding bei resnet verbessern. Statt Nullen lieber "verdoppeln" und dann erst paar Nullen

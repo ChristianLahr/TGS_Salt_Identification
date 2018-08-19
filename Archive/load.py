@@ -4,8 +4,12 @@ import numpy as np
 from tqdm import tqdm
 
 def load_and_resize(ids_, path, im_height, im_width, im_chan, max_n, train=True, resize_=True):
-    X_ = np.zeros((min(len(ids_), max_n), im_height, im_width, im_chan), dtype=np.uint8)
-    Y_ = np.zeros((min(len(ids_), max_n), im_height, im_width, 1), dtype=np.bool)
+    if resize_:
+        X_ = np.zeros((min(len(ids_), max_n), im_height, im_width, im_chan), dtype=np.uint8)
+        Y_ = np.zeros((min(len(ids_), max_n), im_height, im_width, 1), dtype=np.bool)
+    else:
+        X_ = np.zeros((min(len(ids_), max_n), 101, 101, im_chan), dtype=np.uint8)
+        Y_ = np.zeros((min(len(ids_), max_n), 101, 101, 1), dtype=np.bool)
     sizes_ = []
     for n, id_ in tqdm(enumerate(ids_), total=min(len(ids_), max_n)):
         if n > max_n -1:
@@ -14,11 +18,15 @@ def load_and_resize(ids_, path, im_height, im_width, im_chan, max_n, train=True,
         x = img_to_array(img)[:,:,1]
         if resize_:
             x = resize(x, (im_height, im_width, 1), mode='constant', preserve_range=True)
+        else:
+            x = np.expand_dims(x,-1)
         X_[n] = x
         if train:
             mask = img_to_array(load_img(path + '/masks/' + id_))[:,:,1]
             if resize_:
                 mask = resize(mask, (im_height, im_width, 1), mode='constant', preserve_range=True)
+            else:
+                mask = np.expand_dims(mask,-1)
             Y_[n] = mask
         else:
             sizes_.append([x.shape[0], x.shape[1]])

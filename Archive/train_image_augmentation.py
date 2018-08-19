@@ -1,24 +1,23 @@
 from keras.models import Model, load_model
-from keras.layers import Conv2D, Input, Concatenate
 from keras.callbacks import EarlyStopping, ModelCheckpoint
-import cv2
 from keras.preprocessing.image import ImageDataGenerator
+from keras.losses import binary_crossentropy
 from tqdm import tqdm, tnrange
 import os
 import numpy as np
-import matplotlib.pyplot as plt
-from keras.preprocessing.image import img_to_array, load_img
 from skimage.transform import resize
 import sys
-import tensorflow as tf
 from sklearn.model_selection import train_test_split
-from keras import backend as K
 import pandas as pd
 
-from load import load_and_resize
-from metrics_losses import custom_loss, mean_iou
+from numpy.random import seed
+seed(12345)
+from tensorflow import set_random_seed
+set_random_seed(12345)
+
+from Archive.load import load_and_resize
+from Archive.metrics_losses import custom_loss, mean_iou
 from architectures import Architectures
-from keras.losses import binary_crossentropy
 
 SEED = 12345
 BATCH_SIZE = 8
