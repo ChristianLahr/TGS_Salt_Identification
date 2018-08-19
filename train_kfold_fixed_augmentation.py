@@ -1,11 +1,11 @@
 """
-# 18.08.2018
+# 19.08.2018
 # Result kaggle: 0.722
 # Result Eval:
-unet_128_betterDecoder
-epochs 20
-old load and resize
-no /255
+unet_128_betterDecoder_dropout
+/255
+own augmentation (flip and rotate and choice)
+
 
 """
 
@@ -18,12 +18,13 @@ tqdm.pandas()
 
 from keras.models import Model, load_model
 from keras.layers import Conv2D, Input, ZeroPadding2D, Concatenate, concatenate, Reshape
-from keras.layers import MaxPooling2D, RepeatVector, Conv2DTranspose, Cropping2D
+from keras.layers import MaxPooling2D, RepeatVector, Conv2DTranspose, Cropping2D, Dropout
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, ReduceLROnPlateau, CSVLogger
 from keras.preprocessing.image import ImageDataGenerator, img_to_array, load_img
 from keras.callbacks import Callback
 from keras.losses import binary_crossentropy
 from keras.optimizers import Adam
+from keras import backend as K
 
 from skimage.transform import resize
 from sklearn.model_selection import train_test_split
@@ -38,18 +39,18 @@ kaggle_kernal = True
 
 SEED = 12345
 BATCH_SIZE = 8
-EPOCHS = 30
+EPOCHS = 50
 PARTIENCE = 5
 width = 128
 heigth = 128
 im_chan = 1
-fold_count = 5
-fold_count_calculate = 1
+fold_count = 10
+fold_count_calculate = 5
 max_n = 1000000
 max_n_test = 1000000
 
 if kaggle_kernal:
-    MODEL_DIR =       r'models'
+    MODEL_DIR =       r'models/'
     MODEL_NAME =      'model.h5'
     TRAIN_DIR =       r'../input/train/'
     TEST_DIR =        r'../input/test/'
@@ -71,37 +72,24 @@ if not os.path.exists(MODEL_DIR):
     os.mkdir(MODEL_DIR)
 
 ### funtions from other skripts
-def load_and_resize(ids_, path, im_height, im_width, im_chan, max_n, train=True, resize_=True):
-    if resize_:
-        X_ = np.zeros((min(len(ids_), max_n), im_height, im_width, im_chan), dtype=np.uint8)
-        Y_ = np.zeros((min(len(ids_), max_n), im_height, im_width, 1), dtype=np.bool)
-    else:
-        X_ = np.zeros((min(len(ids_), max_n), 101, 101, im_chan), dtype=np.uint8)
-        Y_ = np.zeros((min(len(ids_), max_n), 101, 101, 1), dtype=np.bool)
-    sizes_ = []
+def load_data(ids_, path, im_height, im_width, im_chan, max_n, train=True):
+    X_ = np.zeros((min(len(ids_), max_n), 101, 101, im_chan), dtype=np.uint8)
+    Y_ = np.zeros((min(len(ids_), max_n), 101, 101, 1), dtype=np.bool)
     for n, id_ in tqdm(enumerate(ids_), total=min(len(ids_), max_n)):
         if n > max_n -1:
             break
         img = load_img(path + '/images/' + id_)
         x = img_to_array(img)[:,:,1]
-        if resize_:
-            x = resize(x, (im_height, im_width, 1), mode='constant', preserve_range=True)
-        else:
-            x = np.expand_dims(x,-1)
+        x = np.expand_dims(x,-1)
         X_[n] = x
         if train:
             mask = img_to_array(load_img(path + '/masks/' + id_))[:,:,1]
-            if resize_:
-                mask = resize(mask, (im_height, im_width, 1), mode='constant', preserve_range=True)
-            else:
-                mask = np.expand_dims(mask,-1)
+            mask = np.expand_dims(mask,-1)
             Y_[n] = mask
-        else:
-            sizes_.append([x.shape[0], x.shape[1]])
     if train:
         return X_, Y_
     else:
-        return X_, sizes_
+        return X_
 
 def mean_iou(y_true, y_pred):
     prec = []
@@ -123,26 +111,31 @@ def custom_loss(y_true, y_pred):
 
 class Architectures():
 
-    def unet_128_betterDecoder(self):
+    def unet_128_betterDecoder_dropout(self):
         # smallest grid: 8x8
+        DROP_FRAC = 0.5
         input_img = Input((101, 101, 1), name='img')
         resized = ZeroPadding2D(padding=((14,13), (14,13)))(input_img) #pad tp shape=(None, 128,128,1))
 
         c1 = Conv2D(8, (3, 3), activation='relu', padding='same') (resized)
         c1 = Conv2D(8, (3, 3), activation='relu', padding='same') (c1)
         p1 = MaxPooling2D((2, 2)) (c1)
+        p1 = Dropout(DROP_FRAC)(p1)
 
         c2 = Conv2D(16, (3, 3), activation='relu', padding='same') (p1)
         c2 = Conv2D(16, (3, 3), activation='relu', padding='same') (c2)
         p2 = MaxPooling2D((2, 2)) (c2)
+        p2 = Dropout(DROP_FRAC)(p2)
 
         c3 = Conv2D(32, (3, 3), activation='relu', padding='same') (p2)
         c3 = Conv2D(32, (3, 3), activation='relu', padding='same') (c3)
         p3 = MaxPooling2D((2, 2)) (c3)
+        p3 = Dropout(DROP_FRAC)(p3)
 
         c4 = Conv2D(64, (3, 3), activation='relu', padding='same') (p3)
         c4 = Conv2D(64, (3, 3), activation='relu', padding='same') (c4)
         p4 = MaxPooling2D(pool_size=(2, 2)) (c4)
+        p4 = Dropout(DROP_FRAC)(p4)
 
         c5 = Conv2D(128, (3, 3), activation='relu', padding='same') (p4)
         c5 = Conv2D(128, (3, 3), activation='relu', padding='same') (c5)
@@ -170,6 +163,7 @@ class Architectures():
         c9 = Conv2D(8, (3, 3), activation='relu', padding='same') (u9)
         c9 = Conv2D(4, (1, 1), activation='relu', padding='same') (c9)
         c9 = Conv2D(8, (3, 3), activation='relu', padding='same') (c9)
+        p9 = Dropout(DROP_FRAC)(c9)
 
         outputs = Conv2D(1, (1, 1), activation='sigmoid') (c9)
 
@@ -198,26 +192,39 @@ test_ids = next(os.walk(TEST_DIR + "images"))[2]
 # define and train the model
 def build_model():
     architectures = Architectures()
-    inp, out = architectures.unet_128_betterDecoder()
+    inp, out = architectures.unet_128_betterDecoder_dropout()
     model = Model(inputs=inp, outputs=out)
     #model.summary()
-    model.compile(optimizer=Adam(),loss=binary_crossentropy)
+    model.compile(optimizer=Adam(),loss=binary_crossentropy, metrics=["accuracy"])
     return model
 
 # Get and resize train images and masks
 print('Getting and resizing train images and masks ... ')
 sys.stdout.flush()
-X, Y = load_and_resize(train_ids, TRAIN_DIR, heigth, width, im_chan, max_n, resize_=False)
-X_test, _ = load_and_resize(test_ids, TEST_DIR, heigth, width, im_chan, max_n_test, train=False, resize_=False)
+X, Y = load_data(train_ids, TRAIN_DIR, heigth, width, im_chan, max_n)
+X_test = load_data(test_ids, TEST_DIR, heigth, width, im_chan, max_n_test, train=False)
 
 # normalize the image values to [0, 1] (dont devide again when loading the images into agmentation!!!!)
-#X = X / 255
-#X_test = X_test / 255
+X = X / 255
+X_test = X_test / 255
+
+"""
+data_gen_args = dict(vertical_flip=True,
+                     horizontal_flip=True,
+#                     width_shift_range=0.2,
+#                     height_shift_range=0.2,
+                     zoom_range=0.2,
+#                     shear_range=0.2,
+                     rotation_range=90,
+                    )
+image_datagen = ImageDataGenerator(**data_gen_args)
+"""
 
 # kfold training
 fold_size = len(X) // fold_count
 print("X:", X.shape)
 for fold_id in range(0, min(fold_count, fold_count_calculate)):
+    K.clear_session()
     print('train fold', fold_id+1)
     fold_start = fold_size * fold_id
     fold_end = fold_start + fold_size
@@ -232,6 +239,32 @@ for fold_id in range(0, min(fold_count, fold_count_calculate)):
     X_train = np.concatenate([X[:fold_start], X[fold_end:]])
     Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
 
+    print('image augmentation of train data (n = n*8/2)')
+    def flip_and_transpose_augmentation(X):
+        X_t = [np.transpose(x, axes=[1,0,2]) for x in X]
+        X_tf = [np.fliplr(x) for x in X_t]
+        X_tft = [np.transpose(x, axes=[1,0,2]) for x in X_tf]
+        X_tftf = [np.fliplr(x) for x in X_tft]
+        X_tftft = [np.transpose(x, axes=[1,0,2]) for x in X_tftf]
+        X_tftftf = [np.fliplr(x) for x in X_tftft]
+        X = np.append(X, [np.fliplr(x) for x in X], axis=0)
+        X = np.append(X, X_t, axis=0)
+        X = np.append(X, X_tf, axis=0)
+        X = np.append(X, X_tft, axis=0)
+        X = np.append(X, X_tftf, axis=0)
+        X = np.append(X, X_tftft, axis=0)
+        X = np.append(X, X_tftftf, axis=0)
+        return X
+    X_train_aug = flip_and_transpose_augmentation(X_train)
+    Y_train_aug = flip_and_transpose_augmentation(Y_train)
+    print(X_train_aug.shape)
+    print(Y_train_aug.shape)
+
+    # just train with half of the augmentated images in this fold
+    choice_ids = np.random.choice(len(X_train_aug), int(len(X_train_aug)/2))
+    X_train = X_train_aug[choice_ids,:,:,:]
+    Y_train = Y_train_aug[choice_ids,:,:,:]
+
     model = build_model()
 
     model_path = MODEL_DIR + MODEL_NAME[:-3] + str(fold_id) + '.h5'
@@ -243,22 +276,23 @@ for fold_id in range(0, min(fold_count, fold_count_calculate)):
     earlystopper = EarlyStopping(patience=PARTIENCE, verbose=1)
     tensorBoard = TensorBoard(log_dir=log_path)
     ra_val = LossEvaluation(interval=1)
-    rop = ReduceLROnPlateau(patience=2, factor=0.1, min_lr=0)
+    rop = ReduceLROnPlateau(patience=2, factor=0.1, min_lr=0, verbose=1)
 
-    history = model.fit(X_train, Y_train,
-                        batch_size=BATCH_SIZE,
-                        epochs=EPOCHS,
-                        callbacks=[checkpointer, earlystopper], # , rop
-                        validation_data=(X_valid,Y_valid),
-                        verbose = 0)
-
-    #print(ra_val.scores)
-
+    #history = model.fit(X_train, Y_train,
+    #batch_size=BATCH_SIZE,
+    history = model.fit_generator(image_datagen.flow(X_train, Y_train, batch_size=BATCH_SIZE),
+                                  steps_per_epoch=3*len(X_train)//BATCH_SIZE,
+                                  validation_steps=3*len(X_valid)//BATCH_SIZE,
+                                  epochs=EPOCHS,
+                                  callbacks=[checkpointer, earlystopper, tensorBoard, rop],
+                                  validation_data=(X_valid, Y_valid),
+                                  verbose = 0)
 
 print('load trained models and combine')
 list_of_preds = []
 list_of_preds_X = []
 for fold_id in range(0, min(fold_count, fold_count_calculate)):
+    K.clear_session()
     model_path = MODEL_DIR + MODEL_NAME[:-3] + str(fold_id) + '.h5'
     print('load model', fold_id+1, 'of', fold_count, 'from', model_path)
     model = load_model(model_path, custom_objects={'custom_loss': custom_loss})
@@ -337,3 +371,4 @@ print('number_of_salt_images TRAIN:', number_of_salt_images_X, "of", len(preds_t
 
 number_of_salt_images_Y = np.array([1 for mask in Y if mask.sum()>0]).sum()
 print('number_of_salt_images TRAIN MASKS:', number_of_salt_images_Y, "of", len(Y), str(number_of_salt_images_Y / len(Y)) + '%')
+

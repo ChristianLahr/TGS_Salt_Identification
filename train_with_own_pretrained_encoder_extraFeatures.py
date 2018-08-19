@@ -1,14 +1,12 @@
 """
-# 18.08.2018
-# Result kaggle: 0.722
+# 19.08.2018
+# Result kaggle:
 # Result Eval:
-unet_128_betterDecoder
-epochs 20
-old load and resize
-no /255
+
+unet_pretrainedEncoder
+
 
 """
-
 import os
 import sys
 import numpy as np
@@ -18,12 +16,15 @@ tqdm.pandas()
 
 from keras.models import Model, load_model
 from keras.layers import Conv2D, Input, ZeroPadding2D, Concatenate, concatenate, Reshape
-from keras.layers import MaxPooling2D, RepeatVector, Conv2DTranspose, Cropping2D
+from keras.layers import MaxPooling2D, RepeatVector, Conv2DTranspose, Cropping2D, Flatten, Dense
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, ReduceLROnPlateau, CSVLogger
 from keras.preprocessing.image import ImageDataGenerator, img_to_array, load_img
 from keras.callbacks import Callback
 from keras.losses import binary_crossentropy
 from keras.optimizers import Adam
+from keras import backend as K
+
+import tensorflow as tf
 
 from skimage.transform import resize
 from sklearn.model_selection import train_test_split
@@ -34,8 +35,6 @@ seed(12345)
 from tensorflow import set_random_seed
 set_random_seed(12345)
 
-kaggle_kernal = True
-
 SEED = 12345
 BATCH_SIZE = 8
 EPOCHS = 30
@@ -44,64 +43,53 @@ width = 128
 heigth = 128
 im_chan = 1
 fold_count = 5
-fold_count_calculate = 1
 max_n = 1000000
 max_n_test = 1000000
+
+kaggle_kernal = 0
 
 if kaggle_kernal:
     MODEL_DIR =       r'models'
     MODEL_NAME =      'model.h5'
-    TRAIN_DIR =       r'../input/train/'
-    TEST_DIR =        r'../input/test/'
-    LOG_DIR =         r'logs/'
-    TF_LOG_DIR_RUN =  LOG_DIR + 'tf_run1/'
+    TRAIN_DIR =       r'../input/tgs-salt-identification-challenge/train/'
+    TEST_DIR =        r'../input/tgs-salt-identification-challenge/test/'
+    LOG_DIR =         r'logs_'
+    DEPTH_PATH =      r'../input/tgs-salt-identification-challenge/depths.csv'
 else:
-    MODEL_DIR =       r'models/U-Net/unet_128//03_kaggle/'
+    MODEL_DIR =       r'models/U-Net/pretrained_encoder/'
     MODEL_NAME =      'model1.h5'
     TRAIN_DIR =       r'assets/train/'
     TEST_DIR =        r'assets/test/'
     LOG_DIR =         MODEL_DIR + 'logs/'
-    TF_LOG_DIR_RUN =  LOG_DIR + 'tf_run1/'
+    DEPTH_PATH =      r'assets/train/depths.csv'
+    if not os.path.exists(LOG_DIR):
+        os.mkdir(LOG_DIR)
 
-if not os.path.exists(LOG_DIR):
-    os.mkdir(LOG_DIR)
-if not os.path.exists(TF_LOG_DIR_RUN):
-    os.mkdir(TF_LOG_DIR_RUN)
 if not os.path.exists(MODEL_DIR):
     os.mkdir(MODEL_DIR)
 
-### funtions from other skripts
-def load_and_resize(ids_, path, im_height, im_width, im_chan, max_n, train=True, resize_=True):
-    if resize_:
-        X_ = np.zeros((min(len(ids_), max_n), im_height, im_width, im_chan), dtype=np.uint8)
-        Y_ = np.zeros((min(len(ids_), max_n), im_height, im_width, 1), dtype=np.bool)
-    else:
-        X_ = np.zeros((min(len(ids_), max_n), 101, 101, im_chan), dtype=np.uint8)
-        Y_ = np.zeros((min(len(ids_), max_n), 101, 101, 1), dtype=np.bool)
-    sizes_ = []
+
+def load_data(ids_, path, im_height, im_width, im_chan, max_n, train=True):
+    X_ = np.zeros((min(len(ids_), max_n), 101, 101, im_chan), dtype=np.uint8)
+    X_feat = np.zeros((len(ids_), 1), dtype=np.float32)
+    Y_ = np.zeros((min(len(ids_), max_n), 101, 101, 1), dtype=np.bool)
+    df_depths = pd.read_csv(DEPTH_PATH, index_col='id')
     for n, id_ in tqdm(enumerate(ids_), total=min(len(ids_), max_n)):
         if n > max_n -1:
             break
         img = load_img(path + '/images/' + id_)
         x = img_to_array(img)[:,:,1]
-        if resize_:
-            x = resize(x, (im_height, im_width, 1), mode='constant', preserve_range=True)
-        else:
-            x = np.expand_dims(x,-1)
+        x = np.expand_dims(x,-1)
         X_[n] = x
+        X_feat[n] = df_depths.loc[id_.replace('.png', ''), 'z']
         if train:
             mask = img_to_array(load_img(path + '/masks/' + id_))[:,:,1]
-            if resize_:
-                mask = resize(mask, (im_height, im_width, 1), mode='constant', preserve_range=True)
-            else:
-                mask = np.expand_dims(mask,-1)
+            mask = np.expand_dims(mask,-1)
             Y_[n] = mask
-        else:
-            sizes_.append([x.shape[0], x.shape[1]])
     if train:
-        return X_, Y_
+        return X_, Y_, X_feat
     else:
-        return X_, sizes_
+        return X_, X_feat
 
 def mean_iou(y_true, y_pred):
     prec = []
@@ -125,27 +113,61 @@ class Architectures():
 
     def unet_128_betterDecoder(self):
         # smallest grid: 8x8
+        n_features = 1
         input_img = Input((101, 101, 1), name='img')
+        input_features = Input((n_features, ), name='feat')
+
         resized = ZeroPadding2D(padding=((14,13), (14,13)))(input_img) #pad tp shape=(None, 128,128,1))
 
         c1 = Conv2D(8, (3, 3), activation='relu', padding='same') (resized)
-        c1 = Conv2D(8, (3, 3), activation='relu', padding='same') (c1)
+        c1 = Conv2D(8, (3, 3), activation='relu', padding='same', name='c1') (c1)
         p1 = MaxPooling2D((2, 2)) (c1)
 
         c2 = Conv2D(16, (3, 3), activation='relu', padding='same') (p1)
-        c2 = Conv2D(16, (3, 3), activation='relu', padding='same') (c2)
+        c2 = Conv2D(16, (3, 3), activation='relu', padding='same', name='c2') (c2)
         p2 = MaxPooling2D((2, 2)) (c2)
 
         c3 = Conv2D(32, (3, 3), activation='relu', padding='same') (p2)
-        c3 = Conv2D(32, (3, 3), activation='relu', padding='same') (c3)
+        c3 = Conv2D(32, (3, 3), activation='relu', padding='same', name='c3') (c3)
         p3 = MaxPooling2D((2, 2)) (c3)
 
         c4 = Conv2D(64, (3, 3), activation='relu', padding='same') (p3)
-        c4 = Conv2D(64, (3, 3), activation='relu', padding='same') (c4)
+        c4 = Conv2D(64, (3, 3), activation='relu', padding='same', name='c4') (c4)
         p4 = MaxPooling2D(pool_size=(2, 2)) (c4)
 
-        c5 = Conv2D(128, (3, 3), activation='relu', padding='same') (p4)
-        c5 = Conv2D(128, (3, 3), activation='relu', padding='same') (c5)
+        f_repeat = RepeatVector(8*8)(input_features)
+        f_conv = Reshape((8, 8, n_features))(f_repeat)
+        p4_feat = concatenate([p4, f_conv], -1)
+
+        c5 = Conv2D(128, (3, 3), activation='relu', padding='same') (p4_feat)
+        c5 = Conv2D(128, (3, 3), activation='relu', padding='same', name='c5') (c5)
+
+        fully = Conv2D(1, (1, 1), activation='relu') (c5)
+        flat = Flatten() (fully)
+        depth = Dense(1, activation=None) (flat)
+
+        return input_img, input_features, depth
+
+    def unet_128_encoder_pretrained(self, trainable=1):
+        arch = Architectures()
+        inp_img, inp_feat, out = arch.unet_128_betterDecoder()
+        encoder = Model(inputs=[inp_img, inp_feat], outputs=out)
+        if kaggle_kernal:
+            encoder.load_weights(r'../input/unet_128_betterDecoder_extraFeatureDepth/unet_128_betterDecoder_extraFeatureDepth.h5')
+        else:
+            encoder.load_weights(r'models/U-Net/pretrained_encoder/unet128/encoder_for_unet_128_betterDecoder_extraFeatureDepth.h5')
+        if not trainable:
+            for l in encoder.layers:
+                l.trainable = False
+        c1=encoder.get_layer('c1').output
+        c2=encoder.get_layer('c2').output
+        c3=encoder.get_layer('c3').output
+        c4=encoder.get_layer('c4').output
+        c5=encoder.get_layer('c5').output
+        return inp_img, inp_feat, c5, c4, c3, c2, c1
+
+
+    def unet_128_decoder(self, c5, c4, c3, c2, c1):
 
         u6 = Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='same') (c5)
         u6 = concatenate([u6, c4])
@@ -175,7 +197,7 @@ class Architectures():
 
         cropped = Cropping2D(cropping=((14,13), (14,13)))(outputs)
 
-        return input_img, cropped
+        return cropped
 
 class LossEvaluation(Callback):
     def __init__(self, interval=1):
@@ -198,26 +220,32 @@ test_ids = next(os.walk(TEST_DIR + "images"))[2]
 # define and train the model
 def build_model():
     architectures = Architectures()
-    inp, out = architectures.unet_128_betterDecoder()
-    model = Model(inputs=inp, outputs=out)
-    #model.summary()
-    model.compile(optimizer=Adam(),loss=binary_crossentropy)
+    inp_img, inp_feat, c5, c4, c3, c2, c1 = architectures.unet_128_encoder_pretrained(trainable=1)
+    out = architectures.unet_128_decoder(c5, c4, c3, c2, c1)
+    model = Model(inputs=[inp_img, inp_feat], outputs=out)
+    model.summary()
+    model.compile(optimizer=Adam(),loss=binary_crossentropy, metrics=[binary_crossentropy, mean_iou])
     return model
 
 # Get and resize train images and masks
 print('Getting and resizing train images and masks ... ')
 sys.stdout.flush()
-X, Y = load_and_resize(train_ids, TRAIN_DIR, heigth, width, im_chan, max_n, resize_=False)
-X_test, _ = load_and_resize(test_ids, TEST_DIR, heigth, width, im_chan, max_n_test, train=False, resize_=False)
+X, Y, X_feat = load_data(train_ids, TRAIN_DIR, heigth, width, im_chan, max_n)
+X_test, X_test_feat = load_data(test_ids, TEST_DIR, heigth, width, im_chan, max_n_test, train=False)
 
-# normalize the image values to [0, 1] (dont devide again when loading the images into agmentation!!!!)
-#X = X / 255
-#X_test = X_test / 255
+def normalize_train_valid(feature_train, feture_valid):
+    mean = feature_train.mean(axis=0, keepdims=True)
+    std = feature_train.std(axis=0, keepdims=True)
+    feature_train -= mean
+    feature_train /= std
+    feture_valid -= mean
+    feture_valid /= std
+    return feature_train, feture_valid
 
 # kfold training
 fold_size = len(X) // fold_count
 print("X:", X.shape)
-for fold_id in range(0, min(fold_count, fold_count_calculate)):
+for fold_id in range(0, fold_count):
     print('train fold', fold_id+1)
     fold_start = fold_size * fold_id
     fold_end = fold_start + fold_size
@@ -232,56 +260,55 @@ for fold_id in range(0, min(fold_count, fold_count_calculate)):
     X_train = np.concatenate([X[:fold_start], X[fold_end:]])
     Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
 
+    X_feat_valid = X_feat[fold_start:fold_end]
+    X_feat_train = np.concatenate([X_feat[:fold_start], X_feat[fold_end:]])
+
+    # normalize X_feat with train mean and train std
+    X_feat_train, X_feat_valid = normalize_train_valid(X_feat_train, X_feat_valid)
+
     model = build_model()
 
     model_path = MODEL_DIR + MODEL_NAME[:-3] + str(fold_id) + '.h5'
-    log_path = TF_LOG_DIR_RUN + 'fold_' + str(fold_id) + '/'
+    log_path = LOG_DIR + 'fold_' + str(fold_id) + '/'
     if not os.path.exists(log_path):
         os.mkdir(log_path)
+
+    log_path_console_output = log_path+'console_output.csv'
 
     checkpointer = ModelCheckpoint(model_path, monitor = "val_loss", save_best_only = True, verbose = 2)
     earlystopper = EarlyStopping(patience=PARTIENCE, verbose=1)
     tensorBoard = TensorBoard(log_dir=log_path)
     ra_val = LossEvaluation(interval=1)
-    rop = ReduceLROnPlateau(patience=2, factor=0.1, min_lr=0)
+    rop = ReduceLROnPlateau(patience=2, factor=0.1, min_lr=0, verbose=1)
 
-    history = model.fit(X_train, Y_train,
+    history = model.fit({'img': X_train, 'feat': X_feat_train}, Y_train,
                         batch_size=BATCH_SIZE,
                         epochs=EPOCHS,
-                        callbacks=[checkpointer, earlystopper], # , rop
-                        validation_data=(X_valid,Y_valid),
+                        callbacks=[checkpointer, earlystopper, rop],
+                        validation_data=({'img': X_valid, 'feat': X_feat_valid},Y_valid),
                         verbose = 0)
 
     #print(ra_val.scores)
-
+    del model
 
 print('load trained models and combine')
 list_of_preds = []
-list_of_preds_X = []
-for fold_id in range(0, min(fold_count, fold_count_calculate)):
+list_of_y = []
+for fold_id in range(0, fold_count):
     model_path = MODEL_DIR + MODEL_NAME[:-3] + str(fold_id) + '.h5'
-    print('load model', fold_id+1, 'of', fold_count, 'from', model_path)
+    print('load model', fold_id, 'of', fold_count, 'from', model_path)
     model = load_model(model_path, custom_objects={'custom_loss': custom_loss})
     print('predict')
     preds = model.predict(X_test, verbose = 0)
-    preds_X = model.predict(X, verbose = 0)
     list_of_preds.append(preds)
-    list_of_preds_X.append(preds_X)
-    os.remove(model_path)
-    print('prediction test max:', preds.max())
-    print('prediction train max:', preds_X.max())
 
-preds_test_t = np.zeros(list_of_preds[0].shape)
+test_predicts = np.zeros(list_of_preds[0].shape)
 for fold_predict in list_of_preds:
-    preds_test_t += fold_predict
-preds_test_t /= len(list_of_preds)
-print('average prediction test max:', preds_test_t.max())
+    test_predicts += fold_predict
+test_predicts /= len(list_of_preds)
 
-preds_train_t = np.zeros(list_of_preds_X[0].shape)
-for fold_predict_X in list_of_preds_X:
-    preds_train_t += fold_predict_X
-preds_train_t /= len(list_of_preds_X)
-print('average prediction train max:', preds_train_t.max())
+# Threshold predictions
+preds_test_t = (test_predicts > 0.5).astype(np.uint8)
 
 def RLenc(img, order='F', format=True):
     """
@@ -304,11 +331,13 @@ def RLenc(img, order='F', format=True):
             pos += 1
         else:
             r += 1
+
     # if last run is unsaved (i.e. data ends with 1)
     if r != 0:
         runs.append((pos, r))
         pos += r
         r = 0
+
     if format:
         z = ''
 
@@ -318,22 +347,9 @@ def RLenc(img, order='F', format=True):
     else:
         return runs
 
-pred_dict = {fn[:-4]:RLenc(np.round(preds_test_t[i]).astype(np.uint8)) for i,fn in tqdm(enumerate(test_ids[:min(len(test_ids), max_n_test)]))}
+pred_dict = {fn[:-4]:RLenc(np.round(preds_test_t[i])) for i,fn in tqdm(enumerate(test_ids[:min(len(test_ids), max_n_test)]))}
 
 sub = pd.DataFrame.from_dict(pred_dict,orient='index')
 sub.index.names = ['id']
 sub.columns = ['rle_mask']
-SUBMISSION_PATH = 'submission.csv'
-if os.path.exists(SUBMISSION_PATH):
-    os.remove(SUBMISSION_PATH)
-sub.to_csv(SUBMISSION_PATH)
-
-### Auswertungen
-number_of_salt_images = np.array([1 for rle in sub['rle_mask'].values if len(rle)>0]).sum()
-print('number_of_salt_images TEST:', number_of_salt_images, "of", len(sub), str(number_of_salt_images / len(sub)) + '%')
-
-number_of_salt_images_X = np.array([1 for pred in preds_train_t if np.round(pred).astype(np.uint8).sum()>0]).sum()
-print('number_of_salt_images TRAIN:', number_of_salt_images_X, "of", len(preds_train_t), str(number_of_salt_images_X / len(preds_train_t)) + '%')
-
-number_of_salt_images_Y = np.array([1 for mask in Y if mask.sum()>0]).sum()
-print('number_of_salt_images TRAIN MASKS:', number_of_salt_images_Y, "of", len(Y), str(number_of_salt_images_Y / len(Y)) + '%')
+sub.to_csv(MODEL_DIR + 'submission.csv')

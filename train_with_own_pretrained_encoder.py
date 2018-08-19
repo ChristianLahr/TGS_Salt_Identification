@@ -16,7 +16,7 @@ tqdm.pandas()
 
 from keras.models import Model, load_model
 from keras.layers import Conv2D, Input, ZeroPadding2D, concatenate, Reshape
-from keras.layers import MaxPooling2D, Conv2DTranspose, Cropping2D
+from keras.layers import MaxPooling2D, Conv2DTranspose, Cropping2D, Flatten, Dense
 from keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard, ReduceLROnPlateau, CSVLogger
 from keras.preprocessing.image import ImageDataGenerator, img_to_array, load_img
 from keras.callbacks import Callback
@@ -50,7 +50,7 @@ if kaggle_kernal:
     TEST_DIR =        r'../input/tgs-salt-identification-challenge/test/'
     LOG_DIR =         r'logs_'
 else:
-    MODEL_DIR =       r'models/U-Net/pretrained_encoder/'
+    MODEL_DIR =       r'models/U-Net/pretrained_encoder/unet128/02/'
     MODEL_NAME =      'model1.h5'
     TRAIN_DIR =       r'assets/train/'
     TEST_DIR =        r'assets/test/'
@@ -151,7 +151,7 @@ class Architectures():
         if kaggle_kernal:
             encoder.load_weights(r'../input/unet-128-betterdecoderh5/unet_128_betterDecoder.h5')
         else:
-            encoder.load_weights(r'models/U-Net/pretrained_encoder/unet128/unet_128_betterDecoder.h5')
+            encoder.load_weights(r'models/U-Net/pretrained_encoder/unet128/encoder_for_unet_128_betterDecoder.h5')
         if not trainable:
             for l in encoder.layers:
                 l.trainable = False
@@ -260,7 +260,7 @@ for fold_id in range(0, fold_count):
     earlystopper = EarlyStopping(patience=PARTIENCE, verbose=1)
     tensorBoard = TensorBoard(log_dir=log_path)
     ra_val = LossEvaluation(interval=1)
-    rop = ReduceLROnPlateau(patience=2, factor=0.1, min_lr=0)
+    rop = ReduceLROnPlateau(patience=2, factor=0.1, min_lr=0, verbose=1)
 
     history = model.fit(X_train, Y_train,
                         batch_size=BATCH_SIZE,

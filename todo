@@ -16,3 +16,13 @@
 + brauch man im kernal: './' an Anfang der Pfade?
 
 + padding bei resnet verbessern. Statt Nullen lieber "verdoppeln" und dann erst paar Nullen
+
++ use the correct preprocessing for the pretrained nets
++ align on preprocessing to [-1,1] by /255; -0.5; *2
+
++ an welchen stellen sollte man normalisieren (features; depth)
++ Achtung falls normalisierung bei Training, muss bei orediction mit den selben Werten gearbeitet werden. Also wegspeichern!
+
++ statt resize einfach Bild vier mal nebeneinander reinstecken und am Ende den Schnitt der vier resultierenden Bilder nehmen
+
++ bei kfold, nur die besten 8 / 10 fold benutzen (oder nur den besten). Dafür nach jedem Fold den val_loss der gespeicherten epoche speichern.

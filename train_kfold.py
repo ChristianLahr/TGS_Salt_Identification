@@ -217,7 +217,7 @@ X_test, _ = load_and_resize(test_ids, TEST_DIR, heigth, width, im_chan, max_n_te
 # kfold training
 fold_size = len(X) // fold_count
 print("X", X.shape)
-for fold_id in range(0, fold_count):
+for fold_id in range(0, fold_count):+
     print('train fold', fold_id+1)
     fold_start = fold_size * fold_id
     fold_end = fold_start + fold_size
@@ -231,6 +231,14 @@ for fold_id in range(0, fold_count):
     Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
 
     model = build_model()
+
+    def reset_weights(model):
+        session = K.get_session()
+        for layer in model.layers:
+            if hasattr(layer, 'kernel_initializer'):
+                layer.kernel.initializer.run(session=session)
+    reset_weights(model)
+
     model_path = MODEL_DIR + MODEL_NAME[:-3] + str(fold_id) + '.h5'
     # callbacks
     checkpointer = ModelCheckpoint(model_path, monitor = "val_loss", save_best_only = True, verbose = 1)
@@ -242,10 +250,12 @@ for fold_id in range(0, fold_count):
     history = model.fit_generator(image_datagen.flow(X_train, Y_train, batch_size=BATCH_SIZE),
     #history = model.fit(X_train, Y_train,
     #                   batch_size=BATCH_SIZE,
-                        epochs=EPOCHS,
+                        steps_per_epoch=4000,
+                        validation_steps=4000,
+                        epoch=EPOCHS,
                         callbacks=[checkpointer, earlystopper, tensorBoard],
-                        validation_data=(X_valid,Y_valid),
-                        verbose = 1)
+                        validation_data=image_datagen.flow(X_train, Y_train, batch_size=BATCH_SIZE),
+                        verbose=1)
 
 print('load trained models and combine')
 list_of_preds = []

@@ -1,10 +1,10 @@
 """
 # 18.08.2018
-# Result kaggle:
+# Result kaggle: 0.708
 # Result Eval:
 
 unet_pretrainedEncoder
-
+compiletime for 1 of 5 folds: 2:40 h
 
 """
 import os
@@ -41,61 +41,53 @@ width = 128
 heigth = 128
 im_chan = 1
 fold_count = 5
+fold_count_calculate = 1
 max_n = 1000000
 max_n_test = 1000000
 
-kaggle_kernal = 0
+kaggle_kernal = True
 
 if kaggle_kernal:
-    MODEL_DIR =       r'models'
+    MODEL_DIR =       r'models/'
     MODEL_NAME =      'model.h5'
     TRAIN_DIR =       r'../input/tgs-salt-identification-challenge/train/'
     TEST_DIR =        r'../input/tgs-salt-identification-challenge/test/'
-    LOG_DIR =         r'logs_'
+    LOG_DIR =         r'logs/'
+    TF_LOG_DIR_RUN =  LOG_DIR + 'tf_run1/'
 else:
     MODEL_DIR =       r'models/U-Net/pretrained_encoder/'
     MODEL_NAME =      'model1.h5'
     TRAIN_DIR =       r'assets/train/'
     TEST_DIR =        r'assets/test/'
     LOG_DIR =         MODEL_DIR + 'logs/'
-    if not os.path.exists(LOG_DIR):
-        os.mkdir(LOG_DIR)
+    TF_LOG_DIR_RUN =  LOG_DIR + 'tf_run1/'
 
+if not os.path.exists(LOG_DIR):
+    os.mkdir(LOG_DIR)
+if not os.path.exists(TF_LOG_DIR_RUN):
+    os.mkdir(TF_LOG_DIR_RUN)
 if not os.path.exists(MODEL_DIR):
     os.mkdir(MODEL_DIR)
 
 
-def load_and_resize(ids_, path, im_height, im_width, im_chan, max_n, train=True, resize_=True):
-    if resize_:
-        X_ = np.zeros((min(len(ids_), max_n), im_height, im_width, im_chan), dtype=np.uint8)
-        Y_ = np.zeros((min(len(ids_), max_n), im_height, im_width, 1), dtype=np.bool)
-    else:
-        X_ = np.zeros((min(len(ids_), max_n), 101, 101, im_chan), dtype=np.uint8)
-        Y_ = np.zeros((min(len(ids_), max_n), 101, 101, 1), dtype=np.bool)
-    sizes_ = []
+def load_data(ids_, path, im_height, im_width, im_chan, max_n, train=True):
+    X_ = np.zeros((min(len(ids_), max_n), 101, 101, im_chan), dtype=np.uint8)
+    Y_ = np.zeros((min(len(ids_), max_n), 101, 101, 1), dtype=np.bool)
     for n, id_ in tqdm(enumerate(ids_), total=min(len(ids_), max_n)):
         if n > max_n -1:
             break
         img = load_img(path + '/images/' + id_)
         x = img_to_array(img)[:,:,1]
-        if resize_:
-            x = resize(x, (im_height, im_width, 1), mode='constant', preserve_range=True)
-        else:
-            x = np.expand_dims(x,-1)
+        x = np.expand_dims(x,-1)
         X_[n] = x
         if train:
             mask = img_to_array(load_img(path + '/masks/' + id_))[:,:,1]
-            if resize_:
-                mask = resize(mask, (im_height, im_width, 1), mode='constant', preserve_range=True)
-            else:
-                mask = np.expand_dims(mask,-1)
+            mask = np.expand_dims(mask,-1)
             Y_[n] = mask
-        else:
-            sizes_.append([x.shape[0], x.shape[1]])
     if train:
         return X_, Y_
     else:
-        return X_, sizes_
+        return X_
 
 def mean_iou(y_true, y_pred):
     prec = []
@@ -220,8 +212,8 @@ def build_model():
 # Get and resize train images and masks
 print('Getting and resizing train images and masks ... ')
 sys.stdout.flush()
-X, Y = load_and_resize(train_ids, TRAIN_DIR, heigth, width, im_chan, max_n, resize_=False)
-X_test, _ = load_and_resize(test_ids, TEST_DIR, heigth, width, im_chan, max_n_test, train=False, resize_=False)
+X, Y = load_data(train_ids, TRAIN_DIR, heigth, width, im_chan, max_n)
+X_test = load_data(test_ids, TEST_DIR, heigth, width, im_chan, max_n_test, train=False)
 
 #resnet needs three channels
 X = np.stack((X[:,:,:,0],)*3, -1)
@@ -230,7 +222,7 @@ X_test = np.stack((X_test[:,:,:,0],)*3, -1)
 # kfold training
 fold_size = len(X) // fold_count
 print("X:", X.shape)
-for fold_id in range(0, fold_count):
+for fold_id in range(0, min(fold_count, fold_count_calculate)):
     print('train fold', fold_id+1)
     fold_start = fold_size * fold_id
     fold_end = fold_start + fold_size
@@ -248,7 +240,7 @@ for fold_id in range(0, fold_count):
     model = build_model()
 
     model_path = MODEL_DIR + MODEL_NAME[:-3] + str(fold_id) + '.h5'
-    log_path = LOG_DIR + 'fold_' + str(fold_id) + '/'
+    log_path = TF_LOG_DIR_RUN + 'fold_' + str(fold_id) + '/'
     if not os.path.exists(log_path):
         os.mkdir(log_path)
 
@@ -263,7 +255,7 @@ for fold_id in range(0, fold_count):
     history = model.fit(X_train, Y_train,
                         batch_size=BATCH_SIZE,
                         epochs=EPOCHS,
-                        callbacks=[checkpointer, earlystopper, rop],
+                        callbacks=[checkpointer, earlystopper, rop, tensorBoard],
                         validation_data=(X_valid,Y_valid),
                         verbose = 0)
 
@@ -272,7 +264,7 @@ for fold_id in range(0, fold_count):
 print('load trained models and combine')
 list_of_preds = []
 list_of_y = []
-for fold_id in range(0, fold_count):
+for fold_id in range(0, min(fold_count, fold_count_calculate)):
     print('load model', fold_id, 'of', fold_count, 'from', model_path)
     model_path = MODEL_DIR + MODEL_NAME[:-3] + str(fold_id) + '.h5'
     model = load_model(model_path, custom_objects={'custom_loss': custom_loss})
