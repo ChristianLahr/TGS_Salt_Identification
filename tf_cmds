@@ -1,0 +1,17 @@
+runs: 1
+tensorboard --logdir=/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/01/
+
+runs: 2
+tensorboard --logdir=run1:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/01/,run2:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/02/
+
+runs: 3
+tensorboard --logdir=run1:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/01/,run2:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/02/,run3:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/03/
+
+runs: 4
+tensorboard --logdir=run1:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/01/,run2:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/02/,run3:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/03/,run5:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/encoder_training/unet_128/05/
+
+
+
+
+tensorboard --logdir=run1:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/unet_128/10_augmentation/logs/tf_run1/fold_0,run2:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/unet_128/10_augmentation/logs/tf_run1/fold_1,run3:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/unet_128/10_augmentation/logs/tf_run1/fold_2,run4:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/unet_128/10_augmentation/logs/tf_run1/fold_3,run5:/Users/Chris/PycharmProjects/TGS_Salt_Identification/models/U-Net/unet_128/10_augmentation/logs/tf_run1/fold_4
+
