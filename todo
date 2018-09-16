@@ -20,9 +20,15 @@
 + use the correct preprocessing for the pretrained nets
 + align on preprocessing to [-1,1] by /255; -0.5; *2
 
-+ an welchen stellen sollte man normalisieren (features; depth)
-+ Achtung falls normalisierung bei Training, muss bei orediction mit den selben Werten gearbeitet werden. Also wegspeichern!
++ an welchen Stellen sollte man normalisieren (features; depth)
++ Achtung falls normalisierung bei Training, muss bei prediction mit den selben Werten gearbeitet werden. Also wegspeichern!
 
-+ statt resize einfach Bild vier mal nebeneinander reinstecken und am Ende den Schnitt der vier resultierenden Bilder nehmen
-
-+ bei kfold, nur die besten 8 / 10 fold benutzen (oder nur den besten). Dafür nach jedem Fold den val_loss der gespeicherten epoche speichern.
++ TTA Test time agmentation: test images augmentieren --> predict --> resultat zurücktransformieren --> Schnitt über alle augmentations + original pro test image
++ weiteren Loss der mehr auf Fläche geht. binary_crossentropy + .... ( "dice" https://github.com/killthekitten/kaggle-carvana-2017/blob/master/losses.py)
++ nicht rohes Bild sondern Farben aus matplotlib plot mode extrahieren
++ Salz Coverage benutzen. Daten nach Anteil des Salzes sortieren und dann besser auf Fold aufteilen. )(bei 10 fold jeden 10ten des sortieren arrays auswählen)
++ weitere Features einbauen: https://www.kaggle.com/the1owl/features-for-nn-testing
++ mean_iou über gesamtes train set berechnen und zwar so: Jeder Fold berechnet sein validation set. Diese Ergebnisse decken zusammen das ganze trainings Set ab.
++ mean_iou mit extra penalty, wenn man bei einem Bild ohne Salz nur ein Salz Pixel vorhersagt bekommt man sofort score 0 auf das Bild.
++ Bei vortrainierten Encodern die entsprechenden preprocessing Schritte des original Encoders verwenden (auch Normalisieren mit mean und std aus inet)
++ Bilder normalisieren. Mean und std aus allen pixeln des train und test berechnen
